@@ -10,25 +10,26 @@
 
 //! Sandboxing on FreeBSD via Capsicum.
 
-use platform::unix::process::Process;
-use profile::{self, OperationSupport, OperationSupportLevel, Profile};
-use sandbox::{ChildSandboxMethods, Command, SandboxMethods};
+use std::io;
 
 use libc::c_int;
-use std::io;
+use log::error;
+
+use crate::platform::unix::process::Process;
+use crate::profile::{self, OperationSupport, OperationSupportLevel, Profile};
+use crate::sandbox::{ChildSandboxMethods, Command, SandboxMethods};
 
 impl OperationSupport for profile::Operation {
     fn support(&self) -> OperationSupportLevel {
         match *self {
-            profile::Operation::SystemInfoRead =>
-                OperationSupportLevel::AlwaysAllowed,
-            _ => OperationSupportLevel::NeverAllowed
+            profile::Operation::SystemInfoRead => OperationSupportLevel::AlwaysAllowed,
+            _ => OperationSupportLevel::NeverAllowed,
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub enum Operation { }
+pub enum Operation {}
 
 pub struct Sandbox {
     profile: Profile,
@@ -36,9 +37,7 @@ pub struct Sandbox {
 
 impl Sandbox {
     pub fn new(profile: Profile) -> Sandbox {
-        Sandbox {
-            profile: profile,
-        }
+        Sandbox { profile }
     }
 }
 
@@ -52,18 +51,16 @@ impl SandboxMethods for Sandbox {
     }
 }
 
-pub struct ChildSandbox {
-}
+pub struct ChildSandbox {}
 
 impl ChildSandbox {
     pub fn new(_profile: Profile) -> ChildSandbox {
-        ChildSandbox {
-        }
+        ChildSandbox {}
     }
 }
 
 impl ChildSandboxMethods for ChildSandbox {
-    fn activate(&self) -> Result<(),()> {
+    fn activate(&self) -> Result<(), ()> {
         if unsafe { cap_enter() } == 0 {
             Ok(())
         } else {
@@ -73,6 +70,6 @@ impl ChildSandboxMethods for ChildSandbox {
     }
 }
 
-extern {
+extern "C" {
     fn cap_enter() -> c_int;
 }

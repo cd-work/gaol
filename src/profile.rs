@@ -10,20 +10,21 @@
 
 //! Sandbox profiles—lists of permitted operations.
 
-use platform;
-
 use std::path::PathBuf;
 
-/// A sandbox profile, which specifies the set of operations that this process is allowed to
-/// perform. Operations not in the list are implicitly prohibited.
+use crate::platform;
+
+/// A sandbox profile, which specifies the set of operations that this process
+/// is allowed to perform. Operations not in the list are implicitly prohibited.
 ///
-/// If the process attempts to perform an operation in the list that this platform can prohibit
-/// after the sandbox is entered via `activate()`, the operation will either fail or the process
-/// will be immediately terminated. You can check whether an operation can be prohibited on this
-/// platform with `Operation::prohibition_support()`.
+/// If the process attempts to perform an operation in the list that this
+/// platform can prohibit after the sandbox is entered via `activate()`, the
+/// operation will either fail or the process will be immediately terminated.
+/// You can check whether an operation can be prohibited on this platform with
+/// `Operation::prohibition_support()`.
 ///
-/// All profiles implicitly prohibit *at least* the following operations. Future versions of `gaol`
-/// may add operations to selectively allow these.
+/// All profiles implicitly prohibit *at least* the following operations. Future
+/// versions of `gaol` may add operations to selectively allow these.
 ///
 ///    * Opening any file for writing.
 ///
@@ -39,35 +40,39 @@ use std::path::PathBuf;
 ///
 ///    * Accepting inbound network connections.
 ///
-///    * Any operation that requires superuser privileges on the current operating system.
+///    * Any operation that requires superuser privileges on the current
+///      operating system.
 ///
 /// All profiles implicitly *allow* the following operations:
 ///
-///    * All pure computation (user-mode CPU instructions that do not cause a context switch to
-///      supervisor mode).
+///    * All pure computation (user-mode CPU instructions that do not cause a
+///      context switch to supervisor mode).
 ///
 ///    * Memory allocation (for example, via `brk` or anonymous `mmap` on Unix).
 ///
 ///    * Use of synchronization primitives (mutexes, condition variables).
 ///
-///    * Changing memory protection and use policies: for example, marking pages non-writable or
-///      informing the kernel that memory pages may be discarded. (It may be possible to restrict
-///      this in future versions.)
+///    * Changing memory protection and use policies: for example, marking pages
+///      non-writable or informing the kernel that memory pages may be
+///      discarded. (It may be possible to restrict this in future versions.)
 ///
 ///    * Spawning new threads.
 ///
 ///    * Responding to signals (e.g. `signal`, `sigaltstack`).
 ///
-///    * Read, write, and memory map of already-opened file descriptors or handles.
+///    * Read, write, and memory map of already-opened file descriptors or
+///      handles.
 ///
 ///    * Determining how much has been sent on a file descriptor.
 ///
-///    * Sending or receiving on already-opened sockets, including control messages on Unix.
+///    * Sending or receiving on already-opened sockets, including control
+///      messages on Unix.
 ///
-///    * I/O multiplexing on already-opened sockets and/or file descriptors (`select`/`poll`).
+///    * I/O multiplexing on already-opened sockets and/or file descriptors
+///      (`select`/`poll`).
 ///
-///    * Opening and closing file descriptors and sockets (but not necessarily connecting them
-///      to anything).
+///    * Opening and closing file descriptors and sockets (but not necessarily
+///      connecting them to anything).
 ///
 ///    * Determining the user ID.
 ///
@@ -75,9 +80,10 @@ use std::path::PathBuf;
 ///
 ///    * Exiting the process.
 ///
-/// Because of platform limitations, patterns within one profile are not permitted to overlap; the
-/// behavior is undefined if they do. For example, you may not allow metadata reads of the subpath
-/// rooted at `/dev` while allowing full reads of `/dev/null`; you must instead allow full reads of
+/// Because of platform limitations, patterns within one profile are not
+/// permitted to overlap; the behavior is undefined if they do. For example, you
+/// may not allow metadata reads of the subpath rooted at `/dev` while allowing
+/// full reads of `/dev/null`; you must instead allow full reads of
 /// `/dev` or make the profile more restrictive.
 #[derive(Clone, Debug)]
 pub struct Profile {
@@ -122,22 +128,19 @@ pub enum AddressPattern {
 impl Profile {
     /// Creates a new profile with the given set of allowed operations.
     ///
-    /// If the operations cannot be allowed precisely on this platform, this returns an error. You
-    /// can then inspect the operations via `OperationSupport::support()` to see which ones cannot
-    /// be allowed and modify the set of allowed operations as necessary. We are deliberately
-    /// strict here to reduce the probability of applications accidentally allowing operations due
-    /// to platform limitations.
-    pub fn new(allowed_operations: Vec<Operation>) -> Result<Profile,()> {
-        if allowed_operations.iter().all(|operation| {
-            match operation.support() {
-                OperationSupportLevel::NeverAllowed | OperationSupportLevel::CanBeAllowed => true,
-                OperationSupportLevel::CannotBeAllowedPrecisely |
-                OperationSupportLevel::AlwaysAllowed => false,
-            }
+    /// If the operations cannot be allowed precisely on this platform, this
+    /// returns an error. You can then inspect the operations via
+    /// `OperationSupport::support()` to see which ones cannot be allowed
+    /// and modify the set of allowed operations as necessary. We are
+    /// deliberately strict here to reduce the probability of applications
+    /// accidentally allowing operations due to platform limitations.
+    pub fn new(allowed_operations: Vec<Operation>) -> Result<Profile, ()> {
+        if allowed_operations.iter().all(|operation| match operation.support() {
+            OperationSupportLevel::NeverAllowed | OperationSupportLevel::CanBeAllowed => true,
+            OperationSupportLevel::CannotBeAllowedPrecisely
+            | OperationSupportLevel::AlwaysAllowed => false,
         }) {
-            Ok(Profile {
-                allowed_operations: allowed_operations,
-            })
+            Ok(Profile { allowed_operations })
         } else {
             Err(())
         }
@@ -150,26 +153,25 @@ impl Profile {
 }
 
 /// How precisely an operation can be allowed on this platform.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum OperationSupportLevel {
     /// This operation is never allowed on this platform.
     NeverAllowed,
     /// This operation can be precisely allowed on this platform.
     CanBeAllowed,
-    /// This operation cannot be allowed precisely on this platform, but another set of operations
-    /// allows it to be allowed on a more coarse-grained level. For example, on Linux, it is not
-    /// possible to allow access to specific ports, but it is possible to allow network access
-    /// entirely.
+    /// This operation cannot be allowed precisely on this platform, but another
+    /// set of operations allows it to be allowed on a more coarse-grained
+    /// level. For example, on Linux, it is not possible to allow access to
+    /// specific ports, but it is possible to allow network access entirely.
     CannotBeAllowedPrecisely,
     /// This operation is always allowed on this platform.
     AlwaysAllowed,
 }
 
-/// Allows operations to be queried to determine how precisely they can be allowed on this
-/// platform.
+/// Allows operations to be queried to determine how precisely they can be
+/// allowed on this platform.
 pub trait OperationSupport {
-    /// Returns an `OperationSupportLevel` describing how well this operation can be allowed on
-    /// this platform.
+    /// Returns an `OperationSupportLevel` describing how well this operation
+    /// can be allowed on this platform.
     fn support(&self) -> OperationSupportLevel;
 }
-

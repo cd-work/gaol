@@ -6,10 +6,7 @@ license = "MIT/Apache-2.0"
 documentation = "https://docs.rs/gaol"
 repository = "https://github.com/servo/gaol"
 description = "OS-level application sandboxing library"
-
-[lib]
-name = "gaol"
-path = "lib.rs"
+edition = "2021"
 
 [dependencies]
 libc = "0.2"
@@ -42,4 +39,3 @@ harness = false
 name = "system-info-read"
 path = "tests/system-info-read.rs"
 harness = false
-

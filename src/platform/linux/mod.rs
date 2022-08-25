@@ -8,12 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use platform::linux::seccomp::Filter;
-use platform::unix::process::Process;
-use profile::{self, AddressPattern, OperationSupport, OperationSupportLevel, Profile};
-use sandbox::{ChildSandboxMethods, Command, SandboxMethods};
-
 use std::io;
+
+use crate::platform::linux::seccomp::Filter;
+use crate::platform::unix::process::Process;
+use crate::profile::{self, AddressPattern, OperationSupport, OperationSupportLevel, Profile};
+use crate::sandbox::{ChildSandboxMethods, Command, SandboxMethods};
 
 pub mod misc;
 pub mod namespace;
@@ -26,17 +26,18 @@ pub struct Operation;
 impl OperationSupport for profile::Operation {
     fn support(&self) -> OperationSupportLevel {
         match *self {
-            profile::Operation::FileReadAll(_) |
-            profile::Operation::NetworkOutbound(AddressPattern::All) => {
+            profile::Operation::FileReadAll(_)
+            | profile::Operation::NetworkOutbound(AddressPattern::All) => {
                 OperationSupportLevel::CanBeAllowed
-            }
-            profile::Operation::FileReadMetadata(_) |
-            profile::Operation::NetworkOutbound(AddressPattern::Tcp(_)) |
-            profile::Operation::NetworkOutbound(AddressPattern::LocalSocket(_)) => {
+            },
+            profile::Operation::FileReadMetadata(_)
+            | profile::Operation::NetworkOutbound(AddressPattern::Tcp(_))
+            | profile::Operation::NetworkOutbound(AddressPattern::LocalSocket(_)) => {
                 OperationSupportLevel::CannotBeAllowedPrecisely
-            }
-            profile::Operation::SystemInfoRead |
-            profile::Operation::PlatformSpecific(_) => OperationSupportLevel::NeverAllowed,
+            },
+            profile::Operation::SystemInfoRead | profile::Operation::PlatformSpecific(_) => {
+                OperationSupportLevel::NeverAllowed
+            },
         }
     }
 }
@@ -47,9 +48,7 @@ pub struct Sandbox {
 
 impl Sandbox {
     pub fn new(profile: Profile) -> Sandbox {
-        Sandbox {
-            profile: profile,
-        }
+        Sandbox { profile }
     }
 
     #[cfg(dump_bpf_sockets)]
@@ -79,19 +78,17 @@ pub struct ChildSandbox {
 
 impl ChildSandbox {
     pub fn new(profile: Profile) -> ChildSandbox {
-        ChildSandbox {
-            profile: profile,
-        }
+        ChildSandbox { profile }
     }
 }
 
 impl ChildSandboxMethods for ChildSandbox {
-    fn activate(&self) -> Result<(),()> {
+    fn activate(&self) -> Result<(), ()> {
         if namespace::activate(&self.profile).is_err() {
-            return Err(())
+            return Err(());
         }
         if misc::activate().is_err() {
-            return Err(())
+            return Err(());
         }
         match Filter::new(&self.profile).activate() {
             Ok(_) => Ok(()),
@@ -99,4 +96,3 @@ impl ChildSandboxMethods for ChildSandbox {
         }
     }
 }
-

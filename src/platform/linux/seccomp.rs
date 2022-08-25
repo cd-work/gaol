@@ -10,45 +10,47 @@
 
 //! `seccomp-bpf` support on recent Linux kernels.
 //!
-//! This works in tandem with `namespace` in order to implement sandbox profiles. It is generally
-//! the weaker of the two approaches, because BPF is limited, but it's useful for reducing kernel
-//! attack surface area and implementing coarse-grained policies.
+//! This works in tandem with `namespace` in order to implement sandbox
+//! profiles. It is generally the weaker of the two approaches, because BPF is
+//! limited, but it's useful for reducing kernel attack surface area and
+//! implementing coarse-grained policies.
 
 #![allow(non_upper_case_globals, unused_imports)]
 
-use profile::{Operation, Profile};
-
-use libc::{self, CLONE_CHILD_CLEARTID, CLONE_FILES, CLONE_FS,
-           CLONE_PARENT_SETTID, CLONE_SETTLS, CLONE_SIGHAND, CLONE_SYSVSEM,
-           CLONE_THREAD, CLONE_VM};
-use libc::{AF_INET, AF_INET6, AF_UNIX, AF_NETLINK};
-use libc::{c_char, c_int, c_ulong, c_ushort, c_void};
-use libc::{O_NONBLOCK, O_RDONLY, O_NOCTTY, O_CLOEXEC, FIONREAD, FIOCLEX};
-use libc::{MADV_NORMAL, MADV_RANDOM, MADV_SEQUENTIAL, MADV_WILLNEED, MADV_DONTNEED};
 use std::ffi::CString;
 use std::mem;
 
+use libc::{
+    self, c_char, c_int, c_ulong, c_ushort, c_void, AF_INET, AF_INET6, AF_NETLINK, AF_UNIX,
+    CLONE_CHILD_CLEARTID, CLONE_FILES, CLONE_FS, CLONE_PARENT_SETTID, CLONE_SETTLS, CLONE_SIGHAND,
+    CLONE_SYSVSEM, CLONE_THREAD, CLONE_VM, FIOCLEX, FIONREAD, MADV_DONTNEED, MADV_NORMAL,
+    MADV_RANDOM, MADV_SEQUENTIAL, MADV_WILLNEED, O_CLOEXEC, O_NOCTTY, O_NONBLOCK, O_RDONLY,
+};
+
+use crate::profile::{Operation, Profile};
+
 /// The architecture number for x86.
-#[cfg(target_arch="x86")]
+#[cfg(target_arch = "x86")]
 const ARCH_NR: u32 = AUDIT_ARCH_X86;
 /// The architecture number for x86-64.
-#[cfg(target_arch="x86_64")]
+#[cfg(target_arch = "x86_64")]
 const ARCH_NR: u32 = AUDIT_ARCH_X86_64;
 /// The architecture number for ARM.
-#[cfg(target_arch="arm")]
+#[cfg(target_arch = "arm")]
 const ARCH_NR: u32 = AUDIT_ARCH_ARM;
 /// The architecture number for ARM 64-bit.
-#[cfg(target_arch="aarch64")]
+#[cfg(target_arch = "aarch64")]
 const ARCH_NR: u32 = AUDIT_ARCH_AARCH64;
-#[cfg(target_arch="powerpc")]
+#[cfg(target_arch = "powerpc")]
 const ARCH_NR: u32 = AUDIT_ARCH_PPC;
-#[cfg(all(target_arch="powerpc64", target_endian="big"))]
+#[cfg(all(target_arch = "powerpc64", target_endian = "big"))]
 const ARCH_NR: u32 = AUDIT_ARCH_PPC64;
-#[cfg(all(target_arch="powerpc64", target_endian="little"))]
+#[cfg(all(target_arch = "powerpc64", target_endian = "little"))]
 const ARCH_NR: u32 = AUDIT_ARCH_PPC64LE;
 
 const SECCOMP_RET_KILL: u32 = 0;
 const SECCOMP_RET_ALLOW: u32 = 0x7fff_0000;
+// const SECCOMP_RET_LOG: u32 = 0x7ffc_0000;
 
 const LD: u16 = 0x00;
 const JMP: u16 = 0x05;
@@ -70,11 +72,17 @@ const ARG_2_OFFSET: u32 = 32;
 
 const NETLINK_ROUTE: c_int = 0;
 
+#[cfg(target_arch = "x86")]
 const EM_386: u32 = 3;
+#[cfg(target_arch = "powerpc")]
 const EM_PPC: u32 = 20;
+#[cfg(target_arch = "powerpc64")]
 const EM_PPC64: u32 = 21;
+#[cfg(target_arch = "arm")]
 const EM_ARM: u32 = 40;
+#[cfg(target_arch = "x86_64")]
 const EM_X86_64: u32 = 62;
+#[cfg(target_arch = "aarch64")]
 const EM_AARCH64: u32 = 183;
 
 /// A flag set in the architecture number for all 64-bit architectures.
@@ -82,18 +90,25 @@ const __AUDIT_ARCH_64BIT: u32 = 0x8000_0000;
 /// A flag set in the architecture number for all little-endian architectures.
 const __AUDIT_ARCH_LE: u32 = 0x4000_0000;
 /// The architecture number for x86.
+#[cfg(target_arch = "x86")]
 const AUDIT_ARCH_X86: u32 = EM_386 | __AUDIT_ARCH_LE;
 /// The architecture number for x86-64.
+#[cfg(target_arch = "x86_64")]
 const AUDIT_ARCH_X86_64: u32 = EM_X86_64 | __AUDIT_ARCH_64BIT | __AUDIT_ARCH_LE;
 /// The architecture number for ARM.
+#[cfg(target_arch = "arm")]
 const AUDIT_ARCH_ARM: u32 = EM_ARM | __AUDIT_ARCH_LE;
 /// The architecture number for ARM 64-bit.
+#[cfg(target_arch = "aarch64")]
 const AUDIT_ARCH_AARCH64: u32 = EM_AARCH64 | __AUDIT_ARCH_64BIT | __AUDIT_ARCH_LE;
 /// The architecture number for ppc.
+#[cfg(target_arch = "powerpc")]
 const AUDIT_ARCH_PPC: u32 = EM_PPC;
 /// The architecture number for ppc64.
+#[cfg(all(target_arch = "powerpc64", target_endian = "big"))]
 const AUDIT_ARCH_PPC64: u32 = EM_PPC64 | __AUDIT_ARCH_64BIT;
 /// The architecture number for ppc64le.
+#[cfg(all(target_arch = "powerpc64", target_endian = "little"))]
 const AUDIT_ARCH_PPC64LE: u32 = EM_PPC64 | __AUDIT_ARCH_64BIT | __AUDIT_ARCH_LE;
 
 const PR_SET_SECCOMP: c_int = 22;
@@ -101,16 +116,11 @@ const PR_SET_NO_NEW_PRIVS: c_int = 38;
 
 const SECCOMP_MODE_FILTER: c_ulong = 2;
 
-static FILTER_PROLOGUE: [sock_filter; 3] = [
-    VALIDATE_ARCHITECTURE_0,
-    VALIDATE_ARCHITECTURE_1,
-    VALIDATE_ARCHITECTURE_2,
-];
+static FILTER_PROLOGUE: [sock_filter; 3] =
+    [VALIDATE_ARCHITECTURE_0, VALIDATE_ARCHITECTURE_1, VALIDATE_ARCHITECTURE_2];
 
 // A most untimely end...
-static FILTER_EPILOGUE: [sock_filter; 1] = [
-    KILL_PROCESS,
-];
+static FILTER_EPILOGUE: [sock_filter; 1] = [KILL_PROCESS];
 
 /// Syscalls that are always allowed.
 pub static ALLOWED_SYSCALLS: [u32; 21] = [
@@ -137,75 +147,42 @@ pub static ALLOWED_SYSCALLS: [u32; 21] = [
     libc::SYS_write as u32,
 ];
 
-static ALLOWED_SYSCALLS_FOR_FILE_READ: [u32; 5] = [
+static ALLOWED_SYSCALLS_FOR_FILE_READ: [u32; 7] = [
     libc::SYS_access as u32,
     libc::SYS_fstat as u32,
     libc::SYS_lseek as u32,
     libc::SYS_readlink as u32,
     libc::SYS_stat as u32,
+    // XXX: These had to be added to fix tests, they were not part of Gaol originally.
+    libc::SYS_openat as u32,
+    libc::SYS_open as u32,
 ];
 
-static ALLOWED_SYSCALLS_FOR_NETWORK_OUTBOUND: [u32; 3] = [
-    libc::SYS_bind as u32,
-    libc::SYS_connect as u32,
-    libc::SYS_getsockname as u32,
-];
+static ALLOWED_SYSCALLS_FOR_NETWORK_OUTBOUND: [u32; 3] =
+    [libc::SYS_bind as u32, libc::SYS_connect as u32, libc::SYS_getsockname as u32];
 
-const ALLOW_SYSCALL: sock_filter = sock_filter {
-    code: RET + K,
-    k: SECCOMP_RET_ALLOW,
-    jt: 0,
-    jf: 0,
-};
+const ALLOW_SYSCALL: sock_filter =
+    sock_filter { code: RET + K, k: SECCOMP_RET_ALLOW, jt: 0, jf: 0 };
 
-const KILL_PROCESS: sock_filter = sock_filter {
-    code: RET + K,
-    k: SECCOMP_RET_KILL,
-    jt: 0,
-    jf: 0,
-};
+const KILL_PROCESS: sock_filter = sock_filter { code: RET + K, k: SECCOMP_RET_KILL, jt: 0, jf: 0 };
 
-const EXAMINE_SYSCALL: sock_filter = sock_filter {
-    code: LD + W + ABS,
-    k: SYSCALL_NR_OFFSET,
-    jt: 0,
-    jf: 0,
-};
+const EXAMINE_SYSCALL: sock_filter =
+    sock_filter { code: LD + W + ABS, k: SYSCALL_NR_OFFSET, jt: 0, jf: 0 };
 
-const EXAMINE_ARG_0: sock_filter = sock_filter {
-    code: LD + W + ABS,
-    k: ARG_0_OFFSET,
-    jt: 0,
-    jf: 0,
-};
+const EXAMINE_ARG_0: sock_filter =
+    sock_filter { code: LD + W + ABS, k: ARG_0_OFFSET, jt: 0, jf: 0 };
 
-const EXAMINE_ARG_1: sock_filter = sock_filter {
-    code: LD + W + ABS,
-    k: ARG_1_OFFSET,
-    jt: 0,
-    jf: 0,
-};
+const EXAMINE_ARG_1: sock_filter =
+    sock_filter { code: LD + W + ABS, k: ARG_1_OFFSET, jt: 0, jf: 0 };
 
-const EXAMINE_ARG_2: sock_filter = sock_filter {
-    code: LD + W + ABS,
-    k: ARG_2_OFFSET,
-    jt: 0,
-    jf: 0,
-};
+const EXAMINE_ARG_2: sock_filter =
+    sock_filter { code: LD + W + ABS, k: ARG_2_OFFSET, jt: 0, jf: 0 };
 
-const VALIDATE_ARCHITECTURE_0: sock_filter = sock_filter {
-    code: LD + W + ABS,
-    k: ARCH_NR_OFFSET,
-    jt: 0,
-    jf: 0,
-};
+const VALIDATE_ARCHITECTURE_0: sock_filter =
+    sock_filter { code: LD + W + ABS, k: ARCH_NR_OFFSET, jt: 0, jf: 0 };
 
-const VALIDATE_ARCHITECTURE_1: sock_filter = sock_filter {
-    code: JMP + JEQ + K,
-    k: ARCH_NR,
-    jt: 1,
-    jf: 0,
-};
+const VALIDATE_ARCHITECTURE_1: sock_filter =
+    sock_filter { code: JMP + JEQ + K, k: ARCH_NR, jt: 1, jf: 0 };
 
 const VALIDATE_ARCHITECTURE_2: sock_filter = KILL_PROCESS;
 
@@ -215,23 +192,20 @@ pub struct Filter {
 
 impl Filter {
     pub fn new(profile: &Profile) -> Filter {
-        let mut filter = Filter {
-            program: FILTER_PROLOGUE.iter().map(|x| *x).collect(),
-        };
+        let mut filter = Filter { program: FILTER_PROLOGUE.to_vec() };
         filter.allow_syscalls(&ALLOWED_SYSCALLS);
 
         if profile.allowed_operations().iter().any(|operation| {
-            match *operation {
-                Operation::FileReadAll(_) | Operation::FileReadMetadata(_) => true,
-                _ => false,
-            }
+            matches!(operation, Operation::FileReadAll(_) | Operation::FileReadMetadata(_))
         }) {
             filter.allow_syscalls(&ALLOWED_SYSCALLS_FOR_FILE_READ);
 
             // Only allow file reading.
             filter.if_syscall_is(libc::SYS_open as u32, |filter| {
-                filter.if_arg1_hasnt_set(!(O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK) as u32,
-                                         |filter| filter.allow_this_syscall())
+                filter.if_arg1_hasnt_set(
+                    !(O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK) as u32,
+                    |filter| filter.allow_this_syscall(),
+                )
             });
 
             // Only allow the `FIONREAD` or `FIOCLEX` `ioctl`s to be performed.
@@ -241,12 +215,11 @@ impl Filter {
             })
         }
 
-        if profile.allowed_operations().iter().any(|operation| {
-            match *operation {
-                Operation::NetworkOutbound(_) => true,
-                _ => false,
-            }
-        }) {
+        if profile
+            .allowed_operations()
+            .iter()
+            .any(|operation| matches!(operation, Operation::NetworkOutbound(_)))
+        {
             filter.allow_syscalls(&ALLOWED_SYSCALLS_FOR_NETWORK_OUTBOUND);
 
             // Only allow Unix, IPv4, IPv6, and netlink route sockets to be created.
@@ -262,27 +235,25 @@ impl Filter {
 
         // Only allow normal threads to be created.
         filter.if_syscall_is(libc::SYS_clone as u32, |filter| {
-            filter.if_arg0_is((CLONE_VM |
-                               CLONE_FS |
-                               CLONE_FILES |
-                               CLONE_SIGHAND |
-                               CLONE_THREAD |
-                               CLONE_SYSVSEM |
-                               CLONE_SETTLS |
-                               CLONE_PARENT_SETTID |
-                               CLONE_CHILD_CLEARTID) as u32,
-                              |filter| filter.allow_this_syscall())
+            filter.if_arg0_is(
+                (CLONE_VM
+                    | CLONE_FS
+                    | CLONE_FILES
+                    | CLONE_SIGHAND
+                    | CLONE_THREAD
+                    | CLONE_SYSVSEM
+                    | CLONE_SETTLS
+                    | CLONE_PARENT_SETTID
+                    | CLONE_CHILD_CLEARTID) as u32,
+                |filter| filter.allow_this_syscall(),
+            )
         });
 
         // Only allow the POSIX values for `madvise`.
         filter.if_syscall_is(libc::SYS_madvise as u32, |filter| {
-            for mode in [
-                MADV_NORMAL,
-                MADV_RANDOM,
-                MADV_SEQUENTIAL,
-                MADV_WILLNEED,
-                MADV_DONTNEED
-            ].iter() {
+            for mode in
+                [MADV_NORMAL, MADV_RANDOM, MADV_SEQUENTIAL, MADV_WILLNEED, MADV_DONTNEED].iter()
+            {
                 filter.if_arg2_is(*mode as u32, |filter| filter.allow_this_syscall())
             }
         });
@@ -296,13 +267,13 @@ impl Filter {
     pub fn dump(&self) {
         let path = CString::from_slice(b"/tmp/gaol-bpf.XXXXXX");
         let mut path = path.as_bytes_with_nul().to_vec();
-        let fd = unsafe {
-            libc::mkstemp(path.as_mut_ptr() as *mut c_char)
-        };
+        let fd = unsafe { libc::mkstemp(path.as_mut_ptr() as *mut c_char) };
         let nbytes = self.program.len() * mem::size_of::<sock_filter>();
         unsafe {
-            assert!(libc::write(fd, self.program.as_ptr() as *const c_void, nbytes as u64) ==
-                    nbytes as i64);
+            assert!(
+                libc::write(fd, self.program.as_ptr() as *const c_void, nbytes as u64)
+                    == nbytes as i64
+            );
             libc::close(fd);
         }
     }
@@ -310,24 +281,24 @@ impl Filter {
     #[cfg(not(dump_bpf_sockets))]
     pub fn dump(&self) {}
 
-    /// Activates this filter, applying all of its restrictions forevermore. This can only be done
-    /// once.
-    pub fn activate(&self) -> Result<(),c_int> {
+    /// Activates this filter, applying all of its restrictions forevermore.
+    /// This can only be done once.
+    pub fn activate(&self) -> Result<(), c_int> {
         unsafe {
             let result = libc::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
             if result != 0 {
-                return Err(result)
+                return Err(result);
             }
 
-            let program = sock_fprog {
-                len: self.program.len() as c_ushort,
-                filter: self.program.as_ptr(),
-            };
-            let result = libc::prctl(PR_SET_SECCOMP,
-                                     SECCOMP_MODE_FILTER,
-                                     &program as *const sock_fprog as usize as c_ulong,
-                                     !0,
-                                     0);
+            let program =
+                sock_fprog { len: self.program.len() as c_ushort, filter: self.program.as_ptr() };
+            let result = libc::prctl(
+                PR_SET_SECCOMP,
+                SECCOMP_MODE_FILTER,
+                &program as *const sock_fprog as usize as c_ulong,
+                !0,
+                0,
+            );
             if result == 0 {
                 Ok(())
             } else {
@@ -346,51 +317,62 @@ impl Filter {
         }
     }
 
-    fn if_syscall_is<F>(&mut self, number: u32, then: F) where F: FnMut(&mut Filter) {
+    fn if_syscall_is<F>(&mut self, number: u32, then: F)
+    where
+        F: FnMut(&mut Filter),
+    {
         self.program.push(EXAMINE_SYSCALL);
         self.if_k_is(number, then)
     }
 
-    fn if_arg0_is<F>(&mut self, value: u32, then: F) where F: FnMut(&mut Filter) {
+    fn if_arg0_is<F>(&mut self, value: u32, then: F)
+    where
+        F: FnMut(&mut Filter),
+    {
         self.program.push(EXAMINE_ARG_0);
         self.if_k_is(value, then)
     }
 
-    fn if_arg1_is<F>(&mut self, value: u32, then: F) where F: FnMut(&mut Filter) {
+    fn if_arg1_is<F>(&mut self, value: u32, then: F)
+    where
+        F: FnMut(&mut Filter),
+    {
         self.program.push(EXAMINE_ARG_1);
         self.if_k_is(value, then)
     }
 
-    fn if_arg1_hasnt_set<F>(&mut self, value: u32, then: F) where F: FnMut(&mut Filter) {
+    fn if_arg1_hasnt_set<F>(&mut self, value: u32, then: F)
+    where
+        F: FnMut(&mut Filter),
+    {
         self.program.push(EXAMINE_ARG_1);
         self.if_k_hasnt_set(value, then)
     }
 
-    fn if_arg2_is<F>(&mut self, value: u32, then: F) where F: FnMut(&mut Filter) {
+    fn if_arg2_is<F>(&mut self, value: u32, then: F)
+    where
+        F: FnMut(&mut Filter),
+    {
         self.program.push(EXAMINE_ARG_2);
         self.if_k_is(value, then)
     }
 
-    fn if_k_is<F>(&mut self, value: u32, mut then: F) where F: FnMut(&mut Filter) {
+    fn if_k_is<F>(&mut self, value: u32, mut then: F)
+    where
+        F: FnMut(&mut Filter),
+    {
         let index = self.program.len();
-        self.program.push(sock_filter {
-            code: JMP + JEQ + K,
-            k: value,
-            jt: 0,
-            jf: 0,
-        });
+        self.program.push(sock_filter { code: JMP + JEQ + K, k: value, jt: 0, jf: 0 });
         then(self);
         self.program[index].jf = (self.program.len() - index - 1) as u8;
     }
 
-    fn if_k_hasnt_set<F>(&mut self, value: u32, mut then: F) where F: FnMut(&mut Filter) {
+    fn if_k_hasnt_set<F>(&mut self, value: u32, mut then: F)
+    where
+        F: FnMut(&mut Filter),
+    {
         let index = self.program.len();
-        self.program.push(sock_filter {
-            code: JMP + JSET + K,
-            k: value,
-            jt: 0,
-            jf: 0,
-        });
+        self.program.push(sock_filter { code: JMP + JSET + K, k: value, jt: 0, jf: 0 });
         then(self);
         self.program[index].jt = (self.program.len() - index - 1) as u8;
     }

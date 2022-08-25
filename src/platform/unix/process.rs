@@ -10,13 +10,12 @@
 
 //! Child process management on POSIX systems.
 
-use sandbox::Command;
+use std::ffi::CString;
+use std::{io, ptr, str};
 
 use libc::{execve, fork, pid_t, waitpid, WEXITSTATUS, WIFEXITED, WTERMSIG};
-use std::ffi::CString;
-use std::io;
-use std::ptr;
-use std::str;
+
+use crate::sandbox::Command;
 
 pub fn exec(command: &Command) -> io::Error {
     let mut args: Vec<_> = vec![command.module_path.as_ptr()];
@@ -35,7 +34,8 @@ pub fn exec(command: &Command) -> io::Error {
                 str::from_utf8(value.to_bytes()).unwrap()
             );
             CString::new(entry).unwrap()
-        }).collect();
+        })
+        .collect();
     let mut env: Vec<_> = env.iter().map(|entry| entry.as_ptr()).collect();
     env.push(ptr::null());
 
@@ -52,8 +52,8 @@ pub fn spawn(command: &Command) -> io::Result<Process> {
             0 => {
                 drop(exec(command));
                 panic!()
-            }
-            pid => Ok(Process { pid: pid }),
+            },
+            pid => Ok(Process { pid }),
         }
     }
 }
@@ -76,16 +76,15 @@ impl Process {
             }
         }
 
-        unsafe {
-            if WIFEXITED(stat) {
-                Ok(ExitStatus::Code(WEXITSTATUS(stat) as i32))
-            } else {
-                Ok(ExitStatus::Signal(WTERMSIG(stat) as i32))
-            }
+        if WIFEXITED(stat) {
+            Ok(ExitStatus::Code(WEXITSTATUS(stat) as i32))
+        } else {
+            Ok(ExitStatus::Signal(WTERMSIG(stat) as i32))
         }
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ExitStatus {
     Code(i32),
     Signal(i32),
@@ -94,9 +93,6 @@ pub enum ExitStatus {
 impl ExitStatus {
     #[inline]
     pub fn success(&self) -> bool {
-        match *self {
-            ExitStatus::Code(0) => true,
-            _ => false,
-        }
+        self == &ExitStatus::Code(0)
     }
 }

@@ -10,16 +10,19 @@
 
 //! Sandboxing on Mac OS X via Seatbelt (`sandboxd`).
 
-use platform::unix::process::Process;
-use profile::{self, AddressPattern, OperationSupport, OperationSupportLevel, PathPattern, Profile};
-use sandbox::{ChildSandboxMethods, Command, SandboxMethods};
-
-use libc::{c_char, c_int};
 use std::ffi::{CStr, CString};
 use std::io::{self, Write};
 use std::path::Path;
-use std::ptr;
-use std::str;
+use std::{ptr, str};
+
+use libc::{c_char, c_int};
+use log::{debug, error};
+
+use crate::platform::unix::process::Process;
+use crate::profile::{
+    self, AddressPattern, OperationSupport, OperationSupportLevel, PathPattern, Profile,
+};
+use crate::sandbox::{ChildSandboxMethods, Command, SandboxMethods};
 
 static SANDBOX_PROFILE_PROLOGUE: &'static [u8] = b"
 (version 1)
@@ -29,15 +32,15 @@ static SANDBOX_PROFILE_PROLOGUE: &'static [u8] = b"
 impl OperationSupport for profile::Operation {
     fn support(&self) -> OperationSupportLevel {
         match *self {
-            profile::Operation::FileReadAll(_) |
-            profile::Operation::FileReadMetadata(_) |
-            profile::Operation::NetworkOutbound(AddressPattern::All) |
-            profile::Operation::NetworkOutbound(AddressPattern::Tcp(_)) |
-            profile::Operation::NetworkOutbound(AddressPattern::LocalSocket(_)) |
-            profile::Operation::SystemInfoRead |
-            profile::Operation::PlatformSpecific(Operation::MachLookup(_)) => {
+            profile::Operation::FileReadAll(_)
+            | profile::Operation::FileReadMetadata(_)
+            | profile::Operation::NetworkOutbound(AddressPattern::All)
+            | profile::Operation::NetworkOutbound(AddressPattern::Tcp(_))
+            | profile::Operation::NetworkOutbound(AddressPattern::LocalSocket(_))
+            | profile::Operation::SystemInfoRead
+            | profile::Operation::PlatformSpecific(Operation::MachLookup(_)) => {
                 OperationSupportLevel::CanBeAllowed
-            }
+            },
         }
     }
 }
@@ -55,9 +58,7 @@ pub struct Sandbox {
 
 impl Sandbox {
     pub fn new(profile: Profile) -> Sandbox {
-        Sandbox {
-            profile: profile,
-        }
+        Sandbox { profile }
     }
 }
 
@@ -77,14 +78,12 @@ pub struct ChildSandbox {
 
 impl ChildSandbox {
     pub fn new(profile: Profile) -> ChildSandbox {
-        ChildSandbox {
-            profile: profile,
-        }
+        ChildSandbox { profile }
     }
 }
 
 impl ChildSandboxMethods for ChildSandbox {
-    fn activate(&self) -> Result<(),()> {
+    fn activate(&self) -> Result<(), ()> {
         let mut sandbox_profile = Vec::new();
         sandbox_profile.write_all(SANDBOX_PROFILE_PROLOGUE).unwrap();
         for operation in self.profile.allowed_operations().iter() {
@@ -93,36 +92,36 @@ impl ChildSandboxMethods for ChildSandbox {
                     sandbox_profile.write_all(b"(allow file-read* ").unwrap();
                     write_file_pattern(&mut sandbox_profile, file_pattern);
                     sandbox_profile.write_all(b")\n").unwrap();
-                }
+                },
                 profile::Operation::FileReadMetadata(ref file_pattern) => {
                     sandbox_profile.write_all(b"(allow file-read-metadata ").unwrap();
                     write_file_pattern(&mut sandbox_profile, file_pattern);
                     sandbox_profile.write_all(b")\n").unwrap();
-                }
+                },
                 profile::Operation::NetworkOutbound(ref address_pattern) => {
                     sandbox_profile.write_all(b"(allow system-socket)\n").unwrap();
                     sandbox_profile.write_all(b"(allow network-outbound").unwrap();
                     match *address_pattern {
-                        AddressPattern::All => {}
+                        AddressPattern::All => {},
                         AddressPattern::Tcp(port) => {
                             write!(&mut sandbox_profile, " (remote tcp \"*:{}\")", port).unwrap()
-                        }
+                        },
                         AddressPattern::LocalSocket(ref path) => {
                             sandbox_profile.write_all(b"( literal ").unwrap();
                             write_path(&mut sandbox_profile, path);
                             sandbox_profile.write_all(b")").unwrap();
-                        }
+                        },
                     }
                     sandbox_profile.write_all(b")\n").unwrap();
-                }
+                },
                 profile::Operation::SystemInfoRead => {
                     sandbox_profile.write_all(b"(allow sysctl-read)\n").unwrap()
-                }
+                },
                 profile::Operation::PlatformSpecific(Operation::MachLookup(ref service_name)) => {
                     sandbox_profile.write_all(b"(allow mach-lookup (global-name ").unwrap();
                     write_quoted_string(&mut sandbox_profile, service_name.as_slice());
                     sandbox_profile.write_all(b"))\n").unwrap();
-                }
+                },
             }
         }
 
@@ -147,11 +146,11 @@ fn write_file_pattern(sandbox_profile: &mut Vec<u8>, path_pattern: &PathPattern)
         PathPattern::Literal(ref path) => {
             sandbox_profile.write_all(b"(literal ").unwrap();
             write_path(sandbox_profile, path)
-        }
+        },
         PathPattern::Subpath(ref path) => {
             sandbox_profile.write_all(b"(subpath ").unwrap();
             write_path(sandbox_profile, path)
-        }
+        },
     }
     sandbox_profile.write_all(b")").unwrap()
 }
@@ -164,7 +163,8 @@ fn write_quoted_string(sandbox_profile: &mut Vec<u8>, string: &[u8]) {
     sandbox_profile.write_all(&[b'"']).unwrap();
     for &byte in string.iter() {
         // FIXME(pcwalton): Is this the right way to quote strings in TinyScheme?
-        // FIXME(pcwalton): Any other special characters we need to worry about in TinyScheme?
+        // FIXME(pcwalton): Any other special characters we need to worry about in
+        // TinyScheme?
         if byte == b'"' || byte == b'\\' {
             sandbox_profile.write_all(&[b'\\']).unwrap()
         }
@@ -173,8 +173,7 @@ fn write_quoted_string(sandbox_profile: &mut Vec<u8>, string: &[u8]) {
     sandbox_profile.write_all(&[b'"']).unwrap()
 }
 
-extern {
+extern "C" {
     fn sandbox_init(profile: *const c_char, flags: u64, errorbuf: *mut *mut c_char) -> c_int;
     fn sandbox_free_error(errorbuf: *mut c_char);
 }
-

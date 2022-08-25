@@ -10,12 +10,14 @@
 
 extern crate gaol;
 
-use gaol::profile::{AddressPattern, Operation, OperationSupport, OperationSupportLevel};
-use gaol::profile::{PathPattern, Profile};
-use gaol::sandbox::{ChildSandbox, ChildSandboxMethods, Command, Sandbox, SandboxMethods};
 use std::env;
 use std::fs::File;
 use std::path::PathBuf;
+
+use gaol::profile::{
+    AddressPattern, Operation, OperationSupport, OperationSupportLevel, PathPattern, Profile,
+};
+use gaol::sandbox::{ChildSandbox, ChildSandboxMethods, Command, Sandbox, SandboxMethods};
 
 // Create the sandbox profile.
 fn profile() -> Profile {
@@ -27,8 +29,8 @@ fn profile() -> Profile {
         Operation::SystemInfoRead,
     ];
 
-    // Remove operations not supported by this OS. (Otherwise the creation of the profile will
-    // fail.)
+    // Remove operations not supported by this OS. (Otherwise the creation of the
+    // profile will fail.)
     operations.retain(|operation| {
         println!("{:?}: {:?}", operation, operation.support());
         match operation.support() {
@@ -49,12 +51,11 @@ fn main() {
                 Err(error) => println!("{:?}", error),
                 Ok(_) => panic!("could access /bin/sh"),
             }
-        }
+        },
         _ => {
             // This is the parent process.
             let mut command = Command::me().unwrap();
             Sandbox::new(profile()).start(command.arg("child")).unwrap().wait().unwrap();
-        }
+        },
     }
 }
-
